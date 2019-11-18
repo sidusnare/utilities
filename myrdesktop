@@ -1,0 +1,230 @@
+#!/usr/bin/env bash 
+
+#Your regular username
+RDPUSER='first'
+#Your username when using AD creds
+DOMUSER='flast'
+#Pipe delimited list of hostname paters to match for AD login
+ADDOMS='example.com|example.net'
+#Domain for using AD auth
+ADDOM='Example'
+
+function resolution {
+
+	if command -v xdpyinfo &>> /dev/null;then
+		RES=$( xdpyinfo  | grep  dimensions: | head -n 1 | awk '{print($2)}' )
+		echo "${RES}"
+		return 0
+	fi
+	if command -v nvidia-settings &>> /dev/null; then
+		RES=$(nvidia-settings -t --query CurrentMetaMode | head -n 1 | tr -d '@' | tr '_' ' ' | tr ' ' '\n'  | grep -E '[0-9]+x[0-9]+' | head -n 1 2>> /dev/null)
+		echo "${RES}"
+		return 0
+	fi
+	if command -v xrandr &>> /dev/null; then
+		RES=$(xrandr -q 2>> /dev/null | grep '\*' | sed -e 's/\*/n/g' -e 's/\+/n/g' -e 's/	/n/g' -e 's/ /n/g' | tr 'n' '\n' | grep -E '[0-9]+x[0-9]+' | sort -u -n | head -n 1)
+		echo "${RES}"
+		return 0
+	fi
+	#Falling back to something safe
+	echo '1024x768'
+	return 0
+}
+
+for p in nc zenity;do
+	if ! command -v "${p}"; then
+		echo "Missing ${p}, please install it" >&2
+		exit 1
+	fi
+done
+if [ -z "$1" ]; then
+	echo 'Missing server name' >&2
+	exit 1
+fi
+
+serv=$1
+ses="${RANDOM}${RANDOM}${RANDOM}"
+date
+if ! [ -e "${HOME}/usr/var/log" ]; then
+	mkdir -p "${HOME}/usr/var/log"
+fi
+grep "${serv}|"  "${HOME}/usr/var/log/jlog."* | tail -n 5
+echo "$(date +%s)|$(date)|${serv}|${ses}|c|rdp" >> "${HOME}/usr/var/log/jlog.$(hostname)"
+uname=$(uname)
+SHARES=( 'usr/tmp' 'usr/local/tmp' 'Downloads' )
+if ! [ -t 1 ] ; then
+	if ! command -v zenity; then
+		echo 'Unable to find zenity' >&2
+		exit 1
+	fi
+fi
+if ! timeout 5s nc -z "${serv}" 3389 &>> /dev/null; then 
+	if  [ -t 1 ] ; then
+		echo "Unable to connect to ${serv} on port 3389."
+		exit 1
+	else
+		#Zen
+		zenity --warning --text="Unable to connect to ${serv} on port 3389."
+		exit 1
+	fi
+fi
+if echo "${serv}" | grep -E -i "${ADDOMS}";then
+	user=$DOMUSER
+	DOMAIN="${ADDOM}"
+else
+	user=$RDPUSER
+	SHARES+=( 'Documents' 'Stuff' '/mnt/Tome' )
+fi
+if [ ! -e "${HOME}/Windows" ]; then
+	mkdir "${HOME}/Windows"
+fi
+
+if [ -e "${HOME}/Windows" ]; then
+	SHARES+=( 'Windows' )
+	if [ -e "${HOME}/usr/src/wincfg" ]; then
+		if [ -e "${HOME}/Windows/src" ]; then
+			rm -rfv "${HOME}/Windows/src"
+		fi
+		cp -arfv "${HOME}/usr/src/wincfg" "${HOME}/Windows/src"
+	fi
+	if [ -e "${HOME}/Documents/Tech/Notes/Windows.txt" ]; then
+		cp "${HOME}/Documents/Tech/Notes/Windows.txt" "${HOME}/Windows/Windows.txt"
+	fi
+	if [ ! -e "${HOME}/Windows/putty" ]; then
+		mkdir "${HOME}/Windows/putty"
+		for i in w32 w64 wa32 wa64;do
+			wget -O "${HOME}/Windows/putty/putty_${i}.zip" "https://the.earth.li/~sgtatham/putty/latest/${i}/putty.zip"
+			mkdir -p "${HOME}/Windows/putty/PuTTY_${i}"
+			unzip -d "${HOME}/Windows/putty/PuTTY_${i}" "${HOME}/Windows/putty/putty_${i}.zip"
+		done
+	fi
+	if [ ! -e "${HOME}/Windows/WinSCP" ]; then
+		winscp="https://winscp.net/$( wget -q -O - 'https://winscp.net/eng/downloads.php' | grep -m 1  'Portable.zip' | awk -F \" '{print($2)}' )"
+		mkdir "${HOME}/Windows/WinSCP"
+		wget -O "${HOME}/Windows/WinSCP.zip" "${winscp}"
+		unzip -d "${HOME}/Windows/WinSCP/" "${HOME}/Windows/WinSCP.zip"
+	fi
+	if [ ! -e "${HOME}/Windows/wrar_32.exe" ]; then
+		rar="https://www.rarlab.com/$( wget -O - -q 'https://www.rarlab.com/download.htm' | grep -m 1  '/rar/wrar[0-9]*\.exe' | awk -F \"  '{print($2)}' )"
+		wget -O "${HOME}/Windows/wrar_32.exe" "${rar}"
+	fi
+	if [ ! -e "${HOME}/Windows/wrar_64.exe" ]; then
+		rar="https://www.rarlab.com/$(wget -O - -q 'https://www.rarlab.com/download.htm' | grep -m 1 '/rar/winrar-x64-[0-9]*\.exe' | awk -F \" '{print($2)}')"
+		wget -O "${HOME}/Windows/wrar_64.exe" "${rar}"
+	fi
+	if [ ! -e "${HOME}/Windows/gvim81.exe" ]; then
+		wget -O "${HOME}/Windows/gvim81.exe" https://ftp.nluug.nl/pub/vim/pc/gvim81.exe
+	fi
+	if [ ! -e "${HOME}/Windows/gVIM" ]; then
+		mkdir "${HOME}/Windows/gVIM"
+		wget -O "${HOME}/Windows/gVIM/vim81rt.zip" 'https://ftp.nluug.nl/pub/vim/pc/vim81rt.zip'
+		wget -O "${HOME}/Windows/gVIM/gvim81.zip" 'https://ftp.nluug.nl/pub/vim/pc/gvim81.zip' 
+		unzip -d "${HOME}/Windows/gVIM/" "${HOME}/Windows/gVIM/vim81rt.zip"
+		unzip -d "${HOME}/Windows/gVIM/" "${HOME}/Windows/gVIM/gvim81.zip"
+	fi
+	if [ ! -e "${HOME}/Windows/SysInternals" ]; then
+		cd "${HOME}/Windows/" || exit 1
+		wget --mirror 'https://live.sysinternals.com/'
+		mv live.sysinternals.com "${HOME}/Windows/SysInternals"
+	fi
+	cd || exit 1
+fi
+
+res=$(resolution)
+if [ -z "$res" ]; then
+	res="1024x768"
+else
+	ores=$res
+	if pidof wmaker;then
+		xdiff=0
+		ydiff=40
+	fi
+	if [ "$uname" = "Darwin" ];then
+		xdiff=10
+		ydiff=10
+	fi
+		
+	x=$(awk -F x '{print($1)}' <<< "${res}" )
+	y=$(awk -F x '{print($2)}' <<< "${res}" )
+	ny=$(( y - ydiff ))
+	nx=$(( x - xdiff ))
+	res="$nx"x"$ny"
+	echo "res was $ores, now $res"
+
+fi
+echo "Display ${DISPLAY}"
+#XFPARMS=( '/sec:tls' '/bpp:24' '-grab-keyboard' '+compression' '/cert-ignore' '/sound:sys:pulse' '/microphone:sys:pulse' )
+XFPARMS=( '/bpp:24' '-grab-keyboard' '+compression' '/cert-ignore' '/sound:sys:pulse' '/microphone:sys:pulse' '-clipboard' )
+RDPARAMS=( '-z' '-a' '24' '-P' '-K' '-B' )
+
+if glxinfo | grep 'direct rendering: Yes';then
+	XFPARMS+=( '/gdi:hw' )
+
+fi
+
+for share in "${SHARES[@]}";do
+	if [ -e "${HOME}/${share}" ];then
+		sn=$(echo "${share}" | tr / _ | sed -e 's/^_//' -e 's/_$//' )
+		XFPARMS+=( "/drive:${sn},${HOME}/${share}" )
+	fi
+done
+if ! [ -t 1 ] ; then
+	WPASS=$(zenity --entry --text="Password for ${user}@${serv}" --hide-text)
+	XFPARMS+=( "/p:${WPASS}" )
+	RDPARAMS+=( '-p' "${WPASS}" )
+fi
+if [ -n "${WINPASS}" ]; then
+	WPASS="${WINPASS}"
+	XFPARMS+=( "/p:${WPASS}" )
+	RDPARAMS+=( '-p' "${WPASS}" )
+fi
+	
+if [ "$uname" != "Darwin" ]; then
+	XFPARMS+=( '-decorations' )
+	RDPARAMS+=( '-D' )
+fi
+
+if [ -n "${DOMAIN}" ]; then
+	XFPARMS+=( "/d:${DOMAIN}" )
+	RDPARAMS+=( '-d' "${DOMAIN}" )
+fi
+
+XFPARMS+=( "/u:${user}" "/v:${serv}" )
+RDPARAMS+=( '-u' "${user}" "${serv}" )
+
+if [ -n "${res}" ] && echo "${res}" | grep '[0-9]*x[0-9]*'; then
+	XFPARMS+=( "/size:${res}" )
+	RDPARAMS+=( '-g' "${res}" )
+fi
+
+
+
+echo "xfreerdp ${XFPARMS[*]}"
+echo "rdesktop ${RDPARAMS[*]}"
+
+if [ -t 1 ] ; then
+	if command -v xfreerdp; then
+		xfreerdp "${XFPARMS[@]}"
+		ret=$?
+	else
+		rdesktop "${RDPARAMS[@]}"
+		ret=$?
+	fi	
+else
+	if command -v xfreerdp; then
+		cmd="xfreerdp ${XFPARMS[*]}"
+		xfreerdp "${XFPARMS[@]}" &>> "${TMP}/rdesktop.${$}.tmp"
+		ret=$?
+	else
+		cmd="rdesktop ${RDPARAMS[*]}"
+		rdesktop "${RDPARAMS[@]}" &>> "${TMP}/rdesktop.${$}.tmp"
+		ret=$?
+	fi
+fi
+if ! [ -t 1 ] ; then
+	if [ "${ret}" -gt 0 ] && [ "${ret}" != '11' ];then
+		zenity --warning --text="Error connecting to ${user}@${serv} with error code ${ret}: $(sed -e "s/${WPASS}/-=REDACTED=-/g" <<< "${cmd}" )$(grep ERROR "${TMP}/rdesktop.${$}.tmp" )"
+	fi
+else
+	$cmd
+fi
